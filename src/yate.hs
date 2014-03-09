@@ -27,7 +27,28 @@ type ProjectDescription = Tree String
 -- "a" :>: L ["b" :>: S "foo","c" :>: S "bar"]
 readDescription :: String -> ProjectDescription
 readDescription = read
-   
+
+data Path = K String
+          | String :.: Path
+            deriving (Eq, Show, Read)
+
+-- |Build a path from a string description
+--
+-- >>> path "foo"
+-- K "foo"
+-- >>> path "foo.bar"
+-- "foo" :.: K "bar"
+-- >>> path "foo.bar.baz"
+-- "foo" :.: ("bar" :.: K "baz")
+path :: String -> Path
+path input = case span (/= '.') input of
+  (w,[])   -> K w
+  (w,rest) -> w :.: path (tail rest)
+
+-- | Extracts a single value from tree given a path
+
+
+
 workToDo :: ProjectType           -- ^type of project, must resolve to source template
             -> FilePath           -- ^output directory of new project
             -> ProjectDescription -- ^project description
