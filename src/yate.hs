@@ -1,11 +1,12 @@
 {-# LANGUAGE GADTs #-}
 module Main where
 import System.Environment(getArgs)
+import Control.Monad(mplus)
 
 type ProjectType = String
 
 -- A node
-data Node a = S String
+data Node a = S a
             | L [ Tree a ]
               deriving (Eq, Show, Read)
                        
@@ -46,7 +47,20 @@ path input = case span (/= '.') input of
   (w,rest) -> w :.: path (tail rest)
 
 -- | Extracts a single value from tree given a path
-
+--
+-- >>> select (K "bar") ("bar" :>: S "foo")
+-- Just "foo"
+-- >>> select (K "bar") ("baz" :>: S "foo")
+-- Nothing
+-- >>> select ("foo" :.: K "bar")  ("foo" :>: L ["bar" :>: S "baz" ])
+-- Just "baz"
+-- >>> select ("foo" :.: K "bar")  ("foo" :>: L ["qix" :>: S "foo", "bar" :>: S "baz" ])
+-- Just "baz"
+select :: Path -> Tree a -> Maybe a
+select (K w)        (w' :>: S a) | w == w'    = Just a
+                                 | otherwise = Nothing
+select (K _)        (_  :>: L _)             = Nothing
+select (w :.: rest) (w' :>: L l) | w == w'    = foldl (mplus) Nothing (map (select rest) l)
 
 
 workToDo :: ProjectType           -- ^type of project, must resolve to source template
