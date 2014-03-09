@@ -1,7 +1,11 @@
 {-# LANGUAGE GADTs #-}
 module Main where
-import System.Environment(getArgs)
-import Control.Monad(mplus)
+import System.Environment(getArgs,getEnv)
+import System.Directory(getDirectoryContents, doesFileExist, doesDirectoryExist,copyFile,
+                        createDirectoryIfMissing)
+import System.FilePath((</>), takeFileName)
+import Control.Monad(mplus, filterM)
+import Data.List(isPrefixOf,intersperse)
 
 type ProjectType = String
 
@@ -63,18 +67,71 @@ select (K _)        (_  :>: L _)             = Nothing
 select (w :.: rest) (w' :>: L l) | w == w'    = foldl (mplus) Nothing (map (select rest) l)
 
 
+-- |Copy given file to target directory
+copyFileTo :: FilePath -> FilePath -> IO FilePath
+copyFileTo targetDirectory source = do
+  let f = targetDirectory </> takeFileName source
+  copyFile source f
+  return f
+  
+-- |Recursively copy a directory
+copyDirectory :: FilePath                   -- ^Target directory
+                 -> (FilePath -> FilePath)   -- ^Mapping function, transforms filenames
+                 -> FilePath                -- ^Source directory
+                 -> IO [FilePath]               
+copyDirectory target f source = do
+  createDirectoryIfMissing True target
+  content <- getDirectoryContents source
+  files <- filterM doesFileExist (map (source </>) content)
+  dirs <- filterM (doesDirectoryExist.(source </>)) (filter (not . isPrefixOf ".") content)
+  newFiles <- mapM (copyFileTo target.f) files
+  newDirs  <- mapM (\ d -> copyDirectory (target </>d ) f (source </> d)) dirs
+  return $ newFiles ++ (concat newDirs)
+
+-- | Compute a mapping from source template files to instantiated template files
+mapFiles :: FilePath   -- ^Template source directory
+            -> ProjectDescription -- ^Project variables
+            -> IO (FilePath -> FilePath)
+mapFiles _ _ = return id
+
+-- |Locate the source directory for given project type
+--
+-- This should:
+--
+-- * locate environment variable YATE_TEMPLATES if it exists, and in this case use the directory
+--   inside this directory that has same name than @projectType@
+-- * Otherwise, try to download template through github, using current user as username/namespace
+--   to use and template name as repository to clone, eg.
+--     locateTemplate foo -> git clone https://github.com/user/foo 
+locateTemplate :: ProjectType -> IO FilePath
+locateTemplate projectType = do
+  templatesDir <- getEnv "YATE_TEMPLATES"
+  return $ templatesDir </> projectType
+  
+instantiateTemplate :: FilePath    -- ^Template source directory
+                       -> FilePath -- ^Target instantiation directory
+                       -> ProjectDescription -- ^Data to use for instantiating template variables
+                       -> IO [FilePath]
+instantiateTemplate sourceTemplate outputDirectory projectDescription = do
+  fileMap <- mapFiles sourceTemplate projectDescription
+  copyDirectory outputDirectory fileMap sourceTemplate  
+  
 workToDo :: ProjectType           -- ^type of project, must resolve to source template
             -> FilePath           -- ^output directory of new project
             -> ProjectDescription -- ^project description
-            -> IO ()
-workToDo projectType outputDirectory projectDescription =
+            -> IO [FilePath]
+workToDo projectType outputDirectory projectDescription = do
   putStrLn $  unlines [ "Instantiating template from",
                         "\tdescription: " ++ show projectDescription,
                         "\ttype: " ++  projectType,
                         "\toutput: " ++ outputDirectory]
+  templateDirectory <- locateTemplate projectType
+  instantiateTemplate templateDirectory outputDirectory projectDescription
 
 main :: IO ()
 main = do
   [ projectType, outputDirectory, projectName ] <- getArgs
   let description = readDescription projectName
-  workToDo projectType outputDirectory description
+  created <- workToDo projectType outputDirectory description
+  putStrLn "Copied Files: "
+  putStrLn $ concat $ intersperse "\n" (map ("\t" ++) created)
