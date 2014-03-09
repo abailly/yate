@@ -1,0 +1,5 @@
+*.txt
+*.pdf
+*.o
+*.hi
+dist/
