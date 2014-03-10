@@ -6,7 +6,8 @@ import System.Environment(getArgs,getEnv)
 import System.Directory(getDirectoryContents, doesFileExist, doesDirectoryExist,
                         createDirectoryIfMissing,
                         getTemporaryDirectory,
-                        removeDirectoryRecursive)
+                        removeDirectoryRecursive,
+                        getPermissions,setPermissions, Permissions(..))
 import System.FilePath((</>), takeFileName,makeRelative,normalise,makeValid)
 import System.Process(rawSystem)
 import System.Exit
@@ -192,12 +193,33 @@ mapFiles source project = do
   instantiated <-  readFile mappings >>= return . instantiate project . instantiateMult project
   return $ makeFileMapper instantiated
 
+-- |Make a file writable
+ensureWritable :: FilePath -> IO FilePath
+ensureWritable file = do
+  p <- getPermissions file
+  setPermissions file (p {writable = True})
+  return file
+  
+-- |Ensure a directory and all its content is writable
+--
+-- This method exists because on Windows `git clone` checks out the .git directory in read-only mode which
+-- makes deleting it fail
+ensureWritableDir :: FilePath -> IO FilePath
+ensureWritableDir dir = do
+  ensureWritable dir
+  content <- getDirectoryContents dir
+  let nonHidden  = filter ( \ p -> p /= "." && p /= "..") content
+  (files,dirs) <- filesAndDirs dir nonHidden
+  mapM_ ensureWritableDir (map (dir </>) dirs)
+  mapM_ ensureWritable (map (dir </> ) files)
+  return dir
+
 cloneFromGithub :: ProjectType  -> IO FilePath
 cloneFromGithub project = do
   tmp <- getTemporaryDirectory
   let output = makeValid $ normalise $ tmp </> project
   exist <- (doesDirectoryExist output)
-  when exist $ removeDirectoryRecursive output
+  when exist $ ensureWritableDir output >>= removeDirectoryRecursive 
   let uri = "https://github.com/" ++ project
   e <- rawSystem "git" ["clone", uri, tmp </> project]
   case e of
