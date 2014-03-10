@@ -2,10 +2,11 @@ module Main where
 import System.Environment(getArgs,getEnv)
 import System.Directory(getDirectoryContents, doesFileExist, doesDirectoryExist,
                         createDirectoryIfMissing)
-import System.FilePath((</>), takeFileName)
+import System.FilePath((</>), takeFileName,makeRelative)
 import Control.Monad(mplus, filterM)
 import Data.List(isPrefixOf,intersperse)
-import Text.Regex.Posix
+import Text.Regex.PCRE((=~),compDotAll)
+import Text.Regex.Base.RegexLike
 
 type ProjectType = String
 
@@ -67,6 +68,20 @@ select (K w)        (w' :>: S a) | w == w'    = Just a
 select (w :.: rest) (w' :>: L l) | w == w'    = foldl (mplus) Nothing (map (select rest) l)
 select _            _                        = Nothing
 
+-- |Select several subtrees of a tree.
+--
+-- >>>  selectMult (K "bar") ("bar" :>: L [ "foo" :>: S "bar", "foo" :>: S "baz" ])
+-- ["foo" :>: S "bar","foo" :>: S "baz"]
+-- >>>  selectMult ("bar" :.: K "foo") ("bar" :>: L [ "foo" :>: S "bar", "foo" :>: S "baz" ])
+-- []
+-- >>>  selectMult ("bar" :.: K "foo") ("bar" :>: L [ "foo" :>: L [ "baz" :>: S "bar", "foo" :>: S "baz" ]])
+-- ["baz" :>: S "bar","foo" :>: S "baz"]
+-- >>>  selectMult ("bar" :.: K "foo") ("bar" :>: L [ "foo" :>: L [ "baz" :>: S "bar"], "foo" :>: L [ "baz" :>: S "baz" ]])
+-- ["baz" :>: S "bar","baz" :>: S "baz"]
+selectMult :: Path -> Tree a -> [ Tree a ]
+selectMult (K w)        (w' :>: L l) | w == w' = l
+selectMult (w :.: rest) (w' :>: L l) | w == w' = foldl (mplus) [] (map (selectMult rest) l)
+selectMult _      _                           = []
 
 -- |Instantiate a template given some project description
 --
@@ -89,11 +104,28 @@ instantiate project input = let (beg,found,end,subs) = input =~ "{{([^}]*)}}" ::
                               _  -> case select (path (head subs)) project of
                                 Just v  -> beg ++ v ++ instantiate project end
                                 Nothing -> beg ++      instantiate project end
-                             
+
+-- |Instantiate list templates, eg. templates with multiple values
+--
+-- >>> instantiateMult ("foo" :>: L ["name" :>: S "foo", "name" :>: S "baz" ]) "{{foo.name}}{{#foo}}name: {{name}}\n{{/foo}}"
+-- "fooname: foo\nname: baz\n"
+-- >>> instantiateMult ("project" :>: L ["name" :>: S "foo", "authors" :>: L ["author" :>: S "baz" ]]) "{{#project.authors}}name: {{author}}\n{{/project.authors}}"
+-- "name: baz\n"
+instantiateMult :: ProjectDescription -> String -> String
+instantiateMult project input = let regex = makeRegexOpts (defaultCompOpt + compDotAll) defaultExecOpt "{{#([^}]*)}}(.*){{/\\1}}"
+                                    (beg,found,end,subs) = match regex input :: (String, String, String, [String])
+                                in case found of
+                                  "" -> input
+                                  _  -> case selectMult (path (head subs)) project of
+                                    []   -> instantiate project beg ++ instantiate project end
+                                    rest -> instantiate project beg
+                                            ++ concatMap (flip instantiate (head$tail subs)) rest
+                                            ++ instantiateMult project end
+                                      
 -- |Copy given file to target directory
-copyFileTo :: FilePath -> TemplateInstantiator ->  FilePath -> IO FilePath
-copyFileTo targetDirectory template source = do
-  let f = targetDirectory </> takeFileName source
+copyFileTo :: FilePath -> TemplateInstantiator ->  (FilePath -> FilePath) -> FilePath -> IO FilePath
+copyFileTo targetDirectory template fileMap source = do
+  let f = targetDirectory </> takeFileName (fileMap source)
   input <- readFile source
   let output = template input
   writeFile f output
@@ -121,15 +153,30 @@ copyDirectory target template f source = do
   content <- getDirectoryContents source
   let nonHidden  = filter nonHiddenFiles content
   (files,dirs) <- filesAndDirs source nonHidden
-  newFiles <- mapM (copyFileTo target template . f source . (source </>)) files
+  newFiles <- mapM (copyFileTo target template (f source) . (source </>)) files
   newDirs  <- mapM (\ d -> copyDirectory (target </>d ) template f (source </> d)) dirs
   return $ newFiles ++ (concat newDirs)
+
+
+type FileMapping = (FilePath,FilePath)
+                            
+makeFileMapper :: String -> (FilePath -> FilePath -> FilePath)
+makeFileMapper input = let mappings = read input :: [FileMapping]
+                           mapping sourceDir file =
+                             let relativeFile = makeRelative sourceDir file
+                             in case lookup relativeFile mappings of
+                               Nothing -> relativeFile
+                               Just f  -> f
+                       in mapping
 
 -- | Compute a mapping from source template files to instantiated template files
 mapFiles :: FilePath   -- ^Template source directory
             -> ProjectDescription -- ^Project variables
             -> IO (FilePath -> FilePath -> FilePath)
-mapFiles _ _ = return $ const id
+mapFiles source project = do
+  let mappings =  source </> ".mapping"
+  instantiated <-  readFile mappings >>= return . instantiate project . instantiateMult project
+  return $ makeFileMapper instantiated
 
 -- |Locate the source directory for given project type
 --
@@ -151,7 +198,7 @@ instantiateTemplate :: FilePath    -- ^Template source directory
                        -> IO [FilePath]
 instantiateTemplate sourceTemplate outputDirectory projectDescription = do
   fileMap <- mapFiles sourceTemplate projectDescription
-  copyDirectory outputDirectory (instantiate projectDescription) fileMap sourceTemplate  
+  copyDirectory outputDirectory (instantiate projectDescription . instantiateMult projectDescription) fileMap sourceTemplate  
   
 workToDo :: ProjectType           -- ^type of project, must resolve to source template
             -> FilePath           -- ^output directory of new project
