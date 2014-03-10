@@ -1,4 +1,6 @@
 {-# LANGUAGE DoAndIfThenElse #-}
+{-# LANGUAGE CPP #-}
+
 module Main where
 import System.Environment(getArgs,getEnv)
 import System.Directory(getDirectoryContents, doesFileExist, doesDirectoryExist,
@@ -11,7 +13,12 @@ import Control.Monad(mplus, filterM)
 import Data.List(isPrefixOf,intersperse)
 import Text.Regex.PCRE((=~),compDotAll)
 import Text.Regex.Base.RegexLike
+
+#ifndef WINDOWS
 import System.Posix.User(getLoginName)
+#else
+import Win32(getLoginName)
+#endif
 
 type ProjectType = String
 
