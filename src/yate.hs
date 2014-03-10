@@ -1,10 +1,11 @@
-{-# LANGUAGE GADTs #-}
 module Main where
 import System.Environment(getArgs,getEnv)
 import System.Directory(getDirectoryContents, doesFileExist, doesDirectoryExist,copyFile,
                         createDirectoryIfMissing)
 import System.FilePath((</>), takeFileName)
 import Control.Monad(mplus, filterM)
+import Control.Arrow((&&&))
+import Control.Monad.Zip(mzip)
 import Data.List(isPrefixOf,intersperse)
 
 type ProjectType = String
@@ -73,26 +74,37 @@ copyFileTo targetDirectory source = do
   let f = targetDirectory </> takeFileName source
   copyFile source f
   return f
-  
+
+-- |Filter non-hidden files
+nonHiddenFiles :: FilePath -> Bool
+nonHiddenFiles = (not . isPrefixOf ".")
+
+-- |List files and directories from a list of filePath
+filesAndDirs :: FilePath -> [FilePath] -> IO ([FilePath], [FilePath])
+filesAndDirs source content = do
+  files <- filterM (doesFileExist      . (source </>)) content
+  dirs  <- filterM (doesDirectoryExist . (source </>)) content
+  return (files,dirs)
+
 -- |Recursively copy a directory
-copyDirectory :: FilePath                   -- ^Target directory
-                 -> (FilePath -> FilePath)   -- ^Mapping function, transforms filenames
-                 -> FilePath                -- ^Source directory
+copyDirectory :: FilePath                             -- ^Target directory 
+                 -> (FilePath -> FilePath -> FilePath)  -- ^Mapping function, transforms filenames
+                 -> FilePath                          -- ^Source directory
                  -> IO [FilePath]               
 copyDirectory target f source = do
   createDirectoryIfMissing True target
   content <- getDirectoryContents source
-  files <- filterM doesFileExist (map (source </>) content)
-  dirs <- filterM (doesDirectoryExist.(source </>)) (filter (not . isPrefixOf ".") content)
-  newFiles <- mapM (copyFileTo target.f) files
+  let nonHidden  = filter nonHiddenFiles content
+  (files,dirs) <- filesAndDirs source nonHidden
+  newFiles <- mapM (copyFileTo target . f source . (source </>)) files
   newDirs  <- mapM (\ d -> copyDirectory (target </>d ) f (source </> d)) dirs
   return $ newFiles ++ (concat newDirs)
 
 -- | Compute a mapping from source template files to instantiated template files
 mapFiles :: FilePath   -- ^Template source directory
             -> ProjectDescription -- ^Project variables
-            -> IO (FilePath -> FilePath)
-mapFiles _ _ = return id
+            -> IO (FilePath -> FilePath -> FilePath)
+mapFiles _ _ = return $ const id
 
 -- |Locate the source directory for given project type
 --
