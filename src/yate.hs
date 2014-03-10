@@ -3,7 +3,8 @@ module Main where
 import System.Environment(getArgs,getEnv)
 import System.Directory(getDirectoryContents, doesFileExist, doesDirectoryExist,
                         createDirectoryIfMissing,
-                        getTemporaryDirectory)
+                        getTemporaryDirectory,
+                        removeDirectoryRecursive)
 import System.FilePath((</>), takeFileName,makeRelative)
 import System.Process(rawSystem)
 import Control.Monad(mplus, filterM)
@@ -185,6 +186,7 @@ mapFiles source project = do
 cloneFromGithub :: ProjectType  -> IO FilePath
 cloneFromGithub project = do
   tmp <- getTemporaryDirectory
+  removeDirectoryRecursive $ tmp </> project
   let uri = "https://github.com/" ++ project
   _ <- rawSystem "git" ["clone", uri, tmp </> project]
   return $ tmp </> project
