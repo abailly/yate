@@ -26,4 +26,5 @@ Executable yate
     cpp-options:      -DWINDOWS
     extra-libraries:  advapi32
     extra-lib-dirs:   c:/Windows/System32
+    cc-options:      --enable-stdcall-fixup
   ghc-options:        -Wall

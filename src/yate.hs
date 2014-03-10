@@ -7,9 +7,11 @@ import System.Directory(getDirectoryContents, doesFileExist, doesDirectoryExist,
                         createDirectoryIfMissing,
                         getTemporaryDirectory,
                         removeDirectoryRecursive)
-import System.FilePath((</>), takeFileName,makeRelative)
+import System.FilePath((</>), takeFileName,makeRelative,normalise,makeValid)
 import System.Process(rawSystem)
-import Control.Monad(mplus, filterM)
+import System.Exit
+import System.IO.Error(catchIOError)
+import Control.Monad(mplus, filterM, when)
 import Data.List(isPrefixOf,intersperse)
 import Text.Regex.PCRE((=~),compDotAll)
 import Text.Regex.Base.RegexLike
@@ -193,10 +195,14 @@ mapFiles source project = do
 cloneFromGithub :: ProjectType  -> IO FilePath
 cloneFromGithub project = do
   tmp <- getTemporaryDirectory
-  removeDirectoryRecursive $ tmp </> project
+  let output = makeValid $ normalise $ tmp </> project
+  exist <- (doesDirectoryExist output)
+  when exist $ removeDirectoryRecursive output
   let uri = "https://github.com/" ++ project
-  _ <- rawSystem "git" ["clone", uri, tmp </> project]
-  return $ tmp </> project
+  e <- rawSystem "git" ["clone", uri, tmp </> project]
+  case e of
+    ExitFailure code -> ioError (userError $ "failed to clone " ++ uri ++ " to " ++ output ++ ", exit code: " ++ show code)
+    ExitSuccess      -> return $ tmp </> project
   
 
 locateTemplateOnGitHub :: ProjectType -> IO FilePath
@@ -217,13 +223,13 @@ locateTemplateOnGitHub project =
 --     locateTemplate foo -> git clone https://github.com/user/foo 
 locateTemplate :: ProjectType -> IO FilePath
 locateTemplate projectType = do
-  templatesDir <- getEnv "YATE_TEMPLATES"
+  templatesDir <- catchIOError (getEnv "YATE_TEMPLATES") (\ _ -> return "none")
   let tmpl = templatesDir </> projectType
   localDir <- doesDirectoryExist tmpl
-  if localDir then
-     return tmpl
+  if localDir then 
+    return tmpl
   else
-     locateTemplateOnGitHub projectType
+    locateTemplateOnGitHub projectType
   
 instantiateTemplate :: FilePath    -- ^Template source directory
                        -> FilePath -- ^Target instantiation directory
