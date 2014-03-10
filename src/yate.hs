@@ -1,12 +1,16 @@
+{-# LANGUAGE DoAndIfThenElse #-}
 module Main where
 import System.Environment(getArgs,getEnv)
 import System.Directory(getDirectoryContents, doesFileExist, doesDirectoryExist,
-                        createDirectoryIfMissing)
+                        createDirectoryIfMissing,
+                        getTemporaryDirectory)
 import System.FilePath((</>), takeFileName,makeRelative)
+import System.Process(rawSystem)
 import Control.Monad(mplus, filterM)
 import Data.List(isPrefixOf,intersperse)
 import Text.Regex.PCRE((=~),compDotAll)
 import Text.Regex.Base.RegexLike
+import System.Posix.User(getLoginName)
 
 type ProjectType = String
 
@@ -178,6 +182,21 @@ mapFiles source project = do
   instantiated <-  readFile mappings >>= return . instantiate project . instantiateMult project
   return $ makeFileMapper instantiated
 
+cloneFromGithub :: ProjectType  -> IO FilePath
+cloneFromGithub project = do
+  tmp <- getTemporaryDirectory
+  let uri = "https://github.com/" ++ project
+  _ <- rawSystem "git" ["clone", uri, tmp </> project]
+  return $ tmp </> project
+  
+
+locateTemplateOnGitHub :: ProjectType -> IO FilePath
+locateTemplateOnGitHub project = 
+  if '/' `elem` project then
+     cloneFromGithub project
+  else 
+     getLoginName >>= \ user -> cloneFromGithub (user ++ "/" ++ project)
+
 -- |Locate the source directory for given project type
 --
 -- This should:
@@ -190,7 +209,12 @@ mapFiles source project = do
 locateTemplate :: ProjectType -> IO FilePath
 locateTemplate projectType = do
   templatesDir <- getEnv "YATE_TEMPLATES"
-  return $ templatesDir </> projectType
+  let tmpl = templatesDir </> projectType
+  localDir <- doesDirectoryExist tmpl
+  if localDir then
+     return tmpl
+  else
+     locateTemplateOnGitHub projectType
   
 instantiateTemplate :: FilePath    -- ^Template source directory
                        -> FilePath -- ^Target instantiation directory
