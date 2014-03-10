@@ -19,7 +19,9 @@ skeletons and instantiate them at will.
 
 # Usage
 
-> yate <template id> <output directory> <template descriptor>
+```
+yate [template id] [output directory] [template descriptor]
+```
 
 ## Template Id
 
