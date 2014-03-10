@@ -1,14 +1,14 @@
 module Main where
 import System.Environment(getArgs,getEnv)
-import System.Directory(getDirectoryContents, doesFileExist, doesDirectoryExist,copyFile,
+import System.Directory(getDirectoryContents, doesFileExist, doesDirectoryExist,
                         createDirectoryIfMissing)
 import System.FilePath((</>), takeFileName)
 import Control.Monad(mplus, filterM)
-import Control.Arrow((&&&))
-import Control.Monad.Zip(mzip)
 import Data.List(isPrefixOf,intersperse)
 
 type ProjectType = String
+
+type TemplateInstantiator = String -> String
 
 -- A node
 data Node a = S a
@@ -63,16 +63,16 @@ path input = case span (/= '.') input of
 -- Just "baz"
 select :: Path -> Tree a -> Maybe a
 select (K w)        (w' :>: S a) | w == w'    = Just a
-                                 | otherwise = Nothing
-select (K _)        (_  :>: L _)             = Nothing
 select (w :.: rest) (w' :>: L l) | w == w'    = foldl (mplus) Nothing (map (select rest) l)
-
+select _            _                        = Nothing
 
 -- |Copy given file to target directory
-copyFileTo :: FilePath -> FilePath -> IO FilePath
-copyFileTo targetDirectory source = do
+copyFileTo :: FilePath -> TemplateInstantiator ->  FilePath -> IO FilePath
+copyFileTo targetDirectory template source = do
   let f = targetDirectory </> takeFileName source
-  copyFile source f
+  input <- readFile source
+  let output = template input
+  writeFile f output
   return f
 
 -- |Filter non-hidden files
@@ -87,17 +87,18 @@ filesAndDirs source content = do
   return (files,dirs)
 
 -- |Recursively copy a directory
-copyDirectory :: FilePath                             -- ^Target directory 
+copyDirectory :: FilePath                             -- ^Target directory
+                 -> TemplateInstantiator              -- ^To instantiate template while copying files
                  -> (FilePath -> FilePath -> FilePath)  -- ^Mapping function, transforms filenames
                  -> FilePath                          -- ^Source directory
                  -> IO [FilePath]               
-copyDirectory target f source = do
+copyDirectory target template f source = do
   createDirectoryIfMissing True target
   content <- getDirectoryContents source
   let nonHidden  = filter nonHiddenFiles content
   (files,dirs) <- filesAndDirs source nonHidden
-  newFiles <- mapM (copyFileTo target . f source . (source </>)) files
-  newDirs  <- mapM (\ d -> copyDirectory (target </>d ) f (source </> d)) dirs
+  newFiles <- mapM (copyFileTo target template . f source . (source </>)) files
+  newDirs  <- mapM (\ d -> copyDirectory (target </>d ) template f (source </> d)) dirs
   return $ newFiles ++ (concat newDirs)
 
 -- | Compute a mapping from source template files to instantiated template files
@@ -126,7 +127,7 @@ instantiateTemplate :: FilePath    -- ^Template source directory
                        -> IO [FilePath]
 instantiateTemplate sourceTemplate outputDirectory projectDescription = do
   fileMap <- mapFiles sourceTemplate projectDescription
-  copyDirectory outputDirectory fileMap sourceTemplate  
+  copyDirectory outputDirectory id fileMap sourceTemplate  
   
 workToDo :: ProjectType           -- ^type of project, must resolve to source template
             -> FilePath           -- ^output directory of new project
