@@ -5,6 +5,7 @@ import System.Directory(getDirectoryContents, doesFileExist, doesDirectoryExist,
 import System.FilePath((</>), takeFileName)
 import Control.Monad(mplus, filterM)
 import Data.List(isPrefixOf,intersperse)
+import Text.Regex.Posix
 
 type ProjectType = String
 
@@ -66,6 +67,29 @@ select (K w)        (w' :>: S a) | w == w'    = Just a
 select (w :.: rest) (w' :>: L l) | w == w'    = foldl (mplus) Nothing (map (select rest) l)
 select _            _                        = Nothing
 
+
+-- |Instantiate a template given some project description
+--
+-- Replaces all occurences of {{var}} with their value.
+--
+-- >>> instantiate ("foo" :>: L ["qix" :>: S "foo", "bar" :>: S "baz" ])  "foo"
+-- "foo"
+-- >>> instantiate ("foo" :>: L ["qix" :>: S "foo", "bar" :>: S "baz" ])  "{{foo.qix}}"
+-- "foo"
+-- >>> instantiate ("foo" :>: L ["qix" :>: S "foo", "bar" :>: S "baz" ])  "baz{{foo.qix}}bar"
+-- "bazfoobar"
+-- >>> instantiate ("foo" :>: L ["qix" :>: S "foo", "bar" :>: S "baz" ])  "baz{{foo.qix}}bar{{foo.bar}}"
+-- "bazfoobarbaz"
+-- >>> instantiate ("foo" :>: L ["qix" :>: S "foo", "bar" :>: S "baz" ])  "baz{{foo}}bar{{foo.bar}}"
+-- "bazbarbaz"
+instantiate :: ProjectDescription -> String -> String
+instantiate project input = let (beg,found,end,subs) = input =~ "{{([^}]*)}}" :: (String, String, String, [String])
+                            in  case found of
+                              "" -> input
+                              _  -> case select (path (head subs)) project of
+                                Just v  -> beg ++ v ++ instantiate project end
+                                Nothing -> beg ++      instantiate project end
+                             
 -- |Copy given file to target directory
 copyFileTo :: FilePath -> TemplateInstantiator ->  FilePath -> IO FilePath
 copyFileTo targetDirectory template source = do
@@ -127,7 +151,7 @@ instantiateTemplate :: FilePath    -- ^Template source directory
                        -> IO [FilePath]
 instantiateTemplate sourceTemplate outputDirectory projectDescription = do
   fileMap <- mapFiles sourceTemplate projectDescription
-  copyDirectory outputDirectory id fileMap sourceTemplate  
+  copyDirectory outputDirectory (instantiate projectDescription) fileMap sourceTemplate  
   
 workToDo :: ProjectType           -- ^type of project, must resolve to source template
             -> FilePath           -- ^output directory of new project
