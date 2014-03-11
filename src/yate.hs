@@ -137,8 +137,21 @@ instantiateMult project input = let regex = makeRegexOpts (defaultCompOpt + comp
                                             ++ concatMap (flip instantiate (head$tail subs)) rest
                                             ++ instantiateMult project end
                                       
--- |Copy given file to target directory
-copyFileTo :: FilePath -> TemplateInstantiator ->  (FilePath -> FilePath) -> FilePath -> IO FilePath
+-- |Main template function
+--
+-- Instantiate variables and blocks references found in @input@ with the contnet of @descriptor@
+template :: ProjectDescription  -- ^Context for template instantiation
+            -> String           -- ^Input string
+            -> String           -- ^Output string
+template descriptor = instantiate descriptor . instantiateMult descriptor
+  
+-- |Instantiate given template file from source directory to target directory
+--
+copyFileTo :: FilePath                    -- ^Target directory for the file
+              -> TemplateInstantiator     -- ^Template instantiation to apply to the file
+              ->  (FilePath -> FilePath)  -- ^File mapping 
+              -> FilePath                 -- ^Source directory
+              -> IO FilePath              -- ^Instantiated file
 copyFileTo targetDirectory template fileMap source = do
   let f = targetDirectory </> takeFileName (fileMap source)
   input <- readFile source
@@ -157,11 +170,11 @@ filesAndDirs source content = do
   dirs  <- filterM (doesDirectoryExist . (source </>)) content
   return (files,dirs)
 
--- |Recursively copy a directory
-copyDirectory :: FilePath                             -- ^Target directory
-                 -> TemplateInstantiator              -- ^To instantiate template while copying files
-                 -> (FilePath -> FilePath -> FilePath)  -- ^Mapping function, transforms filenames
-                 -> FilePath                          -- ^Source directory
+-- |Recursively instantiate a template directory 
+copyDirectory :: FilePath                              -- ^Target directory
+                 -> TemplateInstantiator               -- ^To instantiate template while copying files
+                 -> (FilePath -> FilePath -> FilePath) -- ^Mapping function, transforms filenames
+                 -> FilePath                           -- ^Source directory
                  -> IO [FilePath]               
 copyDirectory target template f source = do
   createDirectoryIfMissing True target
@@ -190,7 +203,7 @@ mapFiles :: FilePath   -- ^Template source directory
             -> IO (FilePath -> FilePath -> FilePath)
 mapFiles source project = do
   let mappings =  source </> ".mapping"
-  instantiated <-  readFile mappings >>= return . instantiate project . instantiateMult project
+  instantiated <- readFile mappings >>= return . template project
   return $ makeFileMapper instantiated
 
 -- |Make a file writable
@@ -259,7 +272,7 @@ instantiateTemplate :: FilePath    -- ^Template source directory
                        -> IO [FilePath]
 instantiateTemplate sourceTemplate outputDirectory projectDescription = do
   fileMap <- mapFiles sourceTemplate projectDescription
-  copyDirectory outputDirectory (instantiate projectDescription . instantiateMult projectDescription) fileMap sourceTemplate  
+  copyDirectory outputDirectory (template projectDescription) fileMap sourceTemplate  
   
 workToDo :: ProjectType           -- ^type of project, must resolve to source template
             -> FilePath           -- ^output directory of new project
@@ -273,8 +286,50 @@ workToDo projectType outputDirectory projectDescription = do
   templateDirectory <- locateTemplate projectType
   instantiateTemplate templateDirectory outputDirectory projectDescription
 
+usage  = "Yet Another Template Engine, Copyright (c) 2014 Arnaud Bailly <arnaud.oqube@gmail.com>\n\
+Usage: yate <source template> <target directory> [<project descriptor>|-c <descriptor file>]\n\
+ \n\
+Instantiate the given <source template> in the <target directory> using variables provided by <project descriptor>.\n\
+Descriptor can be given as a single argument on the command-line or as a file name to be read.\n\
+\n\
+Details\n\
+=======\n\
+\n\
+* Source template is a name that is resolved in fine to a directory on the local system. This resolution can\n\
+  either be:\n\
+   - Locating a directory named <source template> under a directory pointed at by YATE_TEMPLATES environment variable\n\
+   - Cloning to a temporary directory a Github project named <current user>/<source template> iff <source template> \n\
+     does not contain a '/', otherwise use the full <source template> name for Github reference\n\
+* Target directory is where the instantiated templates will be output. If it does not exist, it is created\n\
+* Project descriptor is an arbitrary JSON object whose fields are used to instantiate variables referenced in the \n\
+  source template\n\
+\n\
+Templates\n\
+=========\n\
+\n\
+Templates are simple Mustache (http://mustache.github.io) templates with <project descriptor> used as context for \n\
+variables resolution:\n\
+\n\
+* {{foo.bar}} is a reference to a single value and is instantiated with field bar in field foo from context\n\
+* {{#foo}}...{{/foo}} is a block which is instantiated once for each value in the foo collection. The content of \n\
+  the block uses the passed value as context for resolution\n\
+\n\
+A template can contain a .mapping file at its root which maps source files to target files. This file is itself\n\
+a template that is instantiated with the descriptor prior to be used for file names mapping. After template \n\
+instantiation this file should be readable Haskell list of string tuples (eg. have type [(String,String)]): \n\
+Use [ and ] to enclose the list, separate each item with a comma, use ( and ) to enclose pairs of source/target\n\
+file names."
+
+data YateConfig = YateConfig {
+  projectType       :: ProjectType,         -- ^Type of project, references some template
+  outputDirectory   :: FilePath,            -- ^Output of instantiated project
+  projectDescriptor :: ProjectDescription   -- ^Project descriptor, eg. context for resolving variables
+  } deriving (Eq,Show,Read)
+
+  
 main :: IO ()
 main = do
+  putStrLn usage
   [ projectType, outputDirectory, projectName ] <- getArgs
   let description = readDescription projectName
   created <- workToDo projectType outputDirectory description
