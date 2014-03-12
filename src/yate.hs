@@ -12,6 +12,7 @@ import System.FilePath((</>), takeFileName,makeRelative,normalise,makeValid)
 import System.Process(rawSystem)
 import System.Exit
 import System.IO.Error(catchIOError)
+import System.Console.GetOpt
 import Control.Monad(mplus, filterM, when)
 import Data.List(isPrefixOf,intersperse)
 import Text.Regex.PCRE((=~),compDotAll)
@@ -140,10 +141,10 @@ instantiateMult project input = let regex = makeRegexOpts (defaultCompOpt + comp
 -- |Main template function
 --
 -- Instantiate variables and blocks references found in @input@ with the contnet of @descriptor@
-template :: ProjectDescription  -- ^Context for template instantiation
+doTemplate :: ProjectDescription  -- ^Context for template instantiation
             -> String           -- ^Input string
             -> String           -- ^Output string
-template descriptor = instantiate descriptor . instantiateMult descriptor
+doTemplate descriptor = instantiate descriptor . instantiateMult descriptor
   
 -- |Instantiate given template file from source directory to target directory
 --
@@ -203,7 +204,7 @@ mapFiles :: FilePath   -- ^Template source directory
             -> IO (FilePath -> FilePath -> FilePath)
 mapFiles source project = do
   let mappings =  source </> ".mapping"
-  instantiated <- readFile mappings >>= return . template project
+  instantiated <- readFile mappings >>= return . doTemplate project
   return $ makeFileMapper instantiated
 
 -- |Make a file writable
@@ -219,7 +220,7 @@ ensureWritable file = do
 -- makes deleting it fail
 ensureWritableDir :: FilePath -> IO FilePath
 ensureWritableDir dir = do
-  ensureWritable dir
+  _  <- ensureWritable dir
   content <- getDirectoryContents dir
   let nonHidden  = filter ( \ p -> p /= "." && p /= "..") content
   (files,dirs) <- filesAndDirs dir nonHidden
@@ -272,7 +273,7 @@ instantiateTemplate :: FilePath    -- ^Template source directory
                        -> IO [FilePath]
 instantiateTemplate sourceTemplate outputDirectory projectDescription = do
   fileMap <- mapFiles sourceTemplate projectDescription
-  copyDirectory outputDirectory (template projectDescription) fileMap sourceTemplate  
+  copyDirectory outputDirectory (doTemplate projectDescription) fileMap sourceTemplate  
   
 workToDo :: ProjectType           -- ^type of project, must resolve to source template
             -> FilePath           -- ^output directory of new project
@@ -286,10 +287,12 @@ workToDo projectType outputDirectory projectDescription = do
   templateDirectory <- locateTemplate projectType
   instantiateTemplate templateDirectory outputDirectory projectDescription
 
-usage  = "Yet Another Template Engine, Copyright (c) 2014 Arnaud Bailly <arnaud.oqube@gmail.com>\n\
-Usage: yate <source template> <target directory> [<project descriptor>|-c <descriptor file>]\n\
- \n\
-Instantiate the given <source template> in the <target directory> using variables provided by <project descriptor>.\n\
+headline :: String
+headline = "Yet Another Template Engine, Copyright (c) 2014 Arnaud Bailly <arnaud.oqube@gmail.com>\n\
+Usage: yate [OPTIONS..] [PROJECT DESCRIPTOR]\n"
+
+usage :: String
+usage  =  "Instantiate the given <source template> in the <target directory> using variables provided by <project descriptor>.\n\
 Descriptor can be given as a single argument on the command-line or as a file name to be read.\n\
 \n\
 Details\n\
@@ -321,17 +324,53 @@ Use [ and ] to enclose the list, separate each item with a comma, use ( and ) to
 file names."
 
 data YateConfig = YateConfig {
-  projectType       :: ProjectType,         -- ^Type of project, references some template
-  outputDirectory   :: FilePath,            -- ^Output of instantiated project
-  projectDescriptor :: ProjectDescription   -- ^Project descriptor, eg. context for resolving variables
+  yateProjectType       :: ProjectType,  -- ^Type of project, references some template
+  yateOutputDirectory   :: FilePath,     -- ^Output of instantiated project
+  yateProjectDescriptor :: FilePath,     -- ^Project descriptor, eg. context for resolving variables
+  yateHelp              :: Bool
   } deriving (Eq,Show,Read)
 
-  
+defaultConfig :: YateConfig
+defaultConfig = YateConfig {
+  yateProjectType = "haskell",
+  yateOutputDirectory = "project",
+  yateHelp = False,
+  yateProjectDescriptor = "project.json"
+  }
+                
+options :: [OptDescr (YateConfig -> YateConfig)]
+options =
+     [ Option ['h','?']     ["help"]
+         (NoArg (\ opts -> opts { yateHelp = True }))
+         "yate usage and help"
+     , Option ['o']     ["output"]
+         (ReqArg (\ f opts -> opts { yateOutputDirectory = f })
+                 "DIRECTORY")
+         "output DIRECTORY"
+     , Option ['t']     ["type"]
+         (ReqArg (\ f opts -> opts { yateProjectType =  f })
+                 "STRING")
+         "type STRING"
+     , Option ['p']     ["descriptor"]
+         (ReqArg (\ f opts -> opts { yateProjectDescriptor =  f }) "FILE")
+         "project descriptor FILE"
+     ]
+
+parseOptions :: [String] -> IO (YateConfig , [String])
+parseOptions args = case getOpt Permute options args of
+    (opts,rest,[])   -> return (foldl (flip id) defaultConfig opts, rest)
+    (_   ,_   ,errs) -> fail $ concat errs  ++ usageInfo headline options
+
+    
 main :: IO ()
 main = do
-  putStrLn usage
-  [ projectType, outputDirectory, projectName ] <- getArgs
-  let description = readDescription projectName
-  created <- workToDo projectType outputDirectory description
-  putStrLn "Copied Files: "
-  putStrLn $ concat $ intersperse "\n" (map ("\t" ++) created)
+  (config, parsed) <- getArgs >>= parseOptions
+  if (yateHelp config) then
+    putStrLn $ usageInfo headline options ++ "\n" ++ usage
+  else do
+    description <- case parsed of
+          []     -> readFile (yateProjectDescriptor config) >>= return . readDescription
+          desc:_ -> return $ readDescription desc
+    created <- workToDo (yateProjectType config) (yateOutputDirectory config) description
+    putStrLn "Copied Files: "
+    putStrLn $ concat $ intersperse "\n" (map ("\t" ++) created)
