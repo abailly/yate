@@ -1,7 +1,7 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
 
 -- | Provides Win32-compatible version of some system-level functions
-module Win32(getLoginName) where
+module Yate.Win32(getLoginName) where
 import Foreign
 import Foreign.C
 import System.Win32.Types
