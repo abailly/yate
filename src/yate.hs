@@ -1,6 +1,7 @@
 {-# LANGUAGE DoAndIfThenElse #-}
 {-# LANGUAGE CPP #-}
 
+import System.Directory(doesFileExist)
 import System.Environment(getArgs)
 import System.Console.GetOpt
 import Data.List(intersperse)
@@ -84,16 +85,33 @@ parseOptions args = case getOpt Permute options args of
     (opts,rest,[])   -> return (foldl (flip id) defaultConfig opts, rest)
     (_   ,_   ,errs) -> fail $ concat errs  ++ usageInfo headline options
 
-    
+
+detailedUsage :: String
+detailedUsage = usageInfo headline options ++ "\n" ++ usage
+
 main :: IO ()
 main = do
   (config, parsed) <- getArgs >>= parseOptions
   if (yateHelp config) then
-    putStrLn $ usageInfo headline options ++ "\n" ++ usage
+    putStrLn $ detailedUsage
   else do
     description <- case parsed of
-          []     -> readFile (yateProjectDescriptor config) >>= return . readDescription
-          desc:_ -> return $ readDescription desc
-    created <- makeTemplateInstance (yateProjectType config) (yateOutputDirectory config) description
-    putStrLn "Copied Files: "
-    putStrLn $ concat $ intersperse "\n" (map ("\t" ++) created)
+          []     -> readDescriptor (yateProjectDescriptor config)
+          desc:_ -> readDescriptor desc
+    case description of 
+      Right d -> runTemplate config d
+      Left e  -> putStrLn ("Error running template: "++ e) >> putStrLn detailedUsage
+
+runTemplate :: YateConfig -> ProjectDescription -> IO ()
+runTemplate config d = do
+  created <- makeTemplateInstance (yateProjectType config) (yateOutputDirectory config) d
+  putStrLn "Copied Files: "
+  putStrLn $ concat $ intersperse "\n" (map ("\t" ++) created)
+
+readDescriptor :: FilePath -> IO (Either String ProjectDescription)
+readDescriptor cf = do
+  b <- doesFileExist cf 
+  if b then
+    readFile cf >>= return . Right . readDescription
+  else
+    return $ Left ("project descriptor '" ++ cf ++ "' is not readable")
