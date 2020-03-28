@@ -1,2 +1,4 @@
 .stack-work/
 *~
+/yate.cabal
+/TAGS

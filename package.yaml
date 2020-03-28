@@ -29,16 +29,10 @@ dependencies:
 - process
 - mustache
 - aeson
+- unix
 
 library:
   source-dirs: src
-  when:
-  - condition: os(windows)
-    then:
-      dependencies: Win32
-      other-modules: Yate.Win32
-    else:
-      dependencies: unix
 
 executables:
   yate-exe:
@@ -52,13 +46,6 @@ executables:
     - -with-rtsopts=-N
     dependencies:
     - yate
-    when:
-      - condition: os(windows)
-        cpp-options:      -DWINDOWS
-        extra-libraries:  advapi32
-        extra-lib-dirs:   c:/Windows/System32
-        cc-options:      --enable-stdcall-fixup
-
 
 tests:
   yate-test:
@@ -70,3 +57,5 @@ tests:
     - -with-rtsopts=-N
     dependencies:
     - yate
+    - doctest
+    - doctest-discover
