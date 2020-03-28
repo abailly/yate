@@ -3,8 +3,12 @@
 
 import System.Directory(doesFileExist)
 import System.Environment(getArgs)
+import Control.Applicative((<|>))
 import System.Console.GetOpt
+import Data.Text.Lazy(unpack)
+import Data.Text.Lazy.Encoding (decodeUtf8)
 import Data.List(intersperse)
+import qualified Data.ByteString.Lazy as LBS
 
 import Yate.Projects
 import Yate.Template
@@ -61,7 +65,7 @@ defaultConfig = YateConfig {
   yateHelp = False,
   yateProjectDescriptor = "project.json"
   }
-                
+
 options :: [OptDescr (YateConfig -> YateConfig)]
 options =
      [ Option ['h','?']     ["help"]
@@ -98,7 +102,7 @@ main = do
     description <- case parsed of
           []     -> readDescriptor (yateProjectDescriptor config)
           desc:_ -> readDescriptor desc
-    case description of 
+    case description of
       Right d -> runTemplate config d
       Left e  -> putStrLn ("Error running template: "++ e) >> putStrLn detailedUsage
 
@@ -110,8 +114,8 @@ runTemplate config d = do
 
 readDescriptor :: FilePath -> IO (Either String ProjectDescription)
 readDescriptor cf = do
-  b <- doesFileExist cf 
+  b <- doesFileExist cf
   if b then
-    readFile cf >>= return . Right . readDescription
+    LBS.readFile cf >>= \ content -> return (readDescription (unpack $ decodeUtf8 content) <|> readJSONDescription content)
   else
     return $ Left ("project descriptor '" ++ cf ++ "' is not readable")

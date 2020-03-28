@@ -2,7 +2,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 -- | Handles template instantiation and project descriptors.
 module Yate.Template(doTemplate,
-                     readDescription,
+                     readDescription, readJSONDescription,
                      ProjectDescription) where
 
 import Control.Applicative ((<|>))
@@ -78,15 +78,18 @@ readJSONDescription = eitherDecode
 -- | Read a project description as a labelled tree.
 --
 -- >>> readDescription "\"b\" :>: S \"foo\""
--- "b" :>: S "foo"
+-- Right "b" :>: S "foo"
 --
 -- >>> readDescription "\"project\" :>: L [ \"name\" :>: S \"myproj\"]"
--- "project" :>: L ["name" :>: S "myproj"]
+-- Right "project" :>: L ["name" :>: S "myproj"]
 --
 -- >>> readDescription "\"a\" :>: L [ \"b\" :>: S \"foo\",  \"c\" :>: S \"bar\"]"
--- "a" :>: L ["b" :>: S "foo","c" :>: S "bar"]
-readDescription :: String -> ProjectDescription
-readDescription = read
+-- Right "a" :>: L ["b" :>: S "foo","c" :>: S "bar"]
+readDescription :: String -> Either String ProjectDescription
+readDescription s =
+  case readsPrec 0 s of
+    [(v,"")] -> Right v
+    other -> Left (show other)
 
 data Path = K String
           | String :.: Path
