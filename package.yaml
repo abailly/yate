@@ -1,0 +1,72 @@
+name:                yate
+version:             0.1.0.0
+github:              "githubuser/yate"
+license:             BSD3
+author:              "Author name here"
+maintainer:          "example@example.com"
+copyright:           "2020 Author name here"
+
+extra-source-files:
+- README.md
+- ChangeLog.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Web
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on GitHub at <https://github.com/githubuser/yate#readme>
+
+dependencies:
+- base
+- filepath
+- unordered-containers
+- directory
+- regex-base
+- regex-pcre-builtin
+- process
+- mustache
+- aeson
+
+library:
+  source-dirs: src
+  when:
+  - condition: os(windows)
+    then:
+      dependencies: Win32
+      other-modules: Yate.Win32
+    else:
+      dependencies: unix
+
+executables:
+  yate-exe:
+    main:                yate.hs
+    source-dirs:         app
+    ghc-options:
+    - -Werror
+    - -Wall
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - yate
+    when:
+      - condition: os(windows)
+        cpp-options:      -DWINDOWS
+        extra-libraries:  advapi32
+        extra-lib-dirs:   c:/Windows/System32
+        cc-options:      --enable-stdcall-fixup
+
+
+tests:
+  yate-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - yate

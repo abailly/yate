@@ -1,5 +1,2 @@
-*.txt
-*.pdf
-*.o
-*.hi
-dist/
+.stack-work/
+*~
