@@ -1,10 +1,10 @@
 -- |Utilities for working with files and directories.
 module Yate.Files where
-import System.Directory(getDirectoryContents, doesFileExist, doesDirectoryExist,
-                        getPermissions,setPermissions, Permissions(..))
-import System.FilePath((</>))
-import Control.Monad(filterM)
-import Data.List(isPrefixOf)
+
+import Control.Monad (filterM)
+import Data.List (isPrefixOf)
+import System.Directory (Permissions(..), doesDirectoryExist, doesFileExist, getDirectoryContents, getPermissions, setPermissions)
+import System.FilePath ((</>))
 
 -- |Filter non-hidden files
 nonHiddenFiles :: FilePath -> Bool
@@ -23,7 +23,7 @@ ensureWritable file = do
   p <- getPermissions file
   setPermissions file (p {writable = True})
   return file
-  
+
 -- |Ensure a directory and all its content is writable
 --
 -- This method exists because on Windows `git clone` checks out the .git directory in read-only mode which
@@ -37,4 +37,3 @@ ensureWritableDir dir = do
   mapM_ ensureWritableDir (map (dir </>) dirs)
   mapM_ ensureWritable (map (dir </> ) files)
   return dir
-
